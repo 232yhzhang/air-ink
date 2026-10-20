@@ -1,0 +1,15 @@
+{
+  "name": "air-ink",
+  "private": true,
+  "version": "1.0.0",
+  "type": "module",
+  "description": "隔空书写交互体验 · MediaPipe hand tracking",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview"
+  },
+  "devDependencies": {
+    "vite": "^8.3.4"
+  }
+}
