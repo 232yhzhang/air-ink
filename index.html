@@ -296,6 +296,12 @@
       transform: translateY(-1px);
     }
 
+    .icon-button[aria-pressed="true"] {
+      color: var(--accent-bright);
+      border-color: rgba(215, 184, 128, 0.42);
+      background: rgba(37, 31, 22, 0.72);
+    }
+
     .icon-button:active {
       transform: translateY(0) scale(0.96);
     }
@@ -1612,6 +1618,11 @@
           <span class="live-dot"></span>
           <span id="liveText">等待手势</span>
         </div>
+        <button class="icon-button" id="swapHandsButton" type="button" aria-label="交换左右手识别" aria-pressed="false" title="交换左右手识别">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="M4 9h13M14 5l4 4-4 4M20 15H7M10 19l-4-4 4-4" />
+          </svg>
+        </button>
         <button class="icon-button" id="clearButton" type="button" aria-label="清空画布" title="清空画布">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
             <path d="M4 7h16M9 7V4.8c0-.44.36-.8.8-.8h4.4c.44 0 .8.36.8.8V7M6.5 7l.8 12.1c.03.5.44.9.95.9h7.5c.5 0 .92-.4.95-.9L17.5 7M10 11v5M14 11v5" />
@@ -1810,6 +1821,7 @@
       fxCanvas: document.getElementById("fxCanvas"),
       liveState: document.getElementById("liveState"),
       liveText: document.getElementById("liveText"),
+      swapHandsButton: document.getElementById("swapHandsButton"),
       clearButton: document.getElementById("clearButton"),
       liveHint: document.getElementById("liveHint"),
       liveHintText: document.getElementById("liveHintText"),
@@ -1846,6 +1858,7 @@
       starting: false,
       stream: null,
       landmarker: null,
+      swapHandedness: false,
       tool: "pen",
       color: INK_COLORS[0].value,
       penSize: PEN_SIZES[1].value,
@@ -2474,7 +2487,9 @@
     function resolveHandedness(classification) {
       const entry = Array.isArray(classification) ? classification[0] : classification;
       const raw = entry?.categoryName || entry?.displayName || "";
-      return raw === "Left" || raw === "Right" ? raw : "";
+      if (raw !== "Left" && raw !== "Right") return "";
+      if (!state.swapHandedness) return raw;
+      return raw === "Left" ? "Right" : "Left";
     }
 
     function updateTrackedHands(landmarksList, handednessList = [], worldLandmarksList = []) {
@@ -2704,9 +2719,12 @@
     }
 
     function updateSnowSwipe(hands, now) {
-      const leftPalm = hands.find((hand) => hand.isLeft && hand.openPalm && !hand.fist);
+      const singleHand = hands.length === 1;
+      const swipePalm =
+        hands.find((hand) => hand.isLeft && hand.openPalm && !hand.fist) ||
+        (singleHand ? hands.find((hand) => hand.openPalm && !hand.fist) : null);
 
-      if (!leftPalm) {
+      if (!swipePalm) {
         if (now - state.swipe.lastSeen > 200) {
           state.swipe.history.length = 0;
           state.swipe.fired = false;
@@ -2722,7 +2740,7 @@
       }
 
       const history = state.swipe.history;
-      const center = leftPalm.center;
+      const center = swipePalm.center;
       history.push({ x: center.x, y: center.y, time: now });
       while (history.length && now - history[0].time > SWIPE_WINDOW) history.shift();
 
@@ -2744,6 +2762,9 @@
         state.swipe.fired = true;
         state.swipe.cooldownUntil = now + SWIPE_COOLDOWN;
         state.swipe.history.length = 0;
+        state.palmRequireRelease = true;
+        state.palm.since = 0;
+        state.palm.origin = null;
 
         if (state.strokes.length || state.particles.length) {
           burstWritingIntoSnow();
@@ -2753,12 +2774,15 @@
       }
     }
 
-    function isDrawingHand(hand) {
-      return hand.isRight && hand.indexActive && !hand.openPalm && !hand.fist;
+    function isDrawingHand(hand, singleHand = false) {
+      return (hand.isRight || singleHand) && hand.indexActive && !hand.openPalm && !hand.fist;
     }
 
     function updateFist(hands, now) {
-      const leftFist = hands.find((hand) => hand.isLeft && hand.fist);
+      const singleHand = hands.length === 1;
+      const leftFist =
+        hands.find((hand) => hand.isLeft && hand.fist) ||
+        (singleHand ? hands.find((hand) => hand.fist) : null);
 
       if (leftFist) {
         if (!state.fist.since) state.fist.since = now;
@@ -2780,7 +2804,8 @@
         return;
       }
 
-      const rightHand = hands.find(isDrawingHand);
+      const singleHand = hands.length === 1;
+      const rightHand = hands.find((hand) => isDrawingHand(hand, singleHand));
 
       if (state.activeStroke) {
         if (!rightHand) {
@@ -2875,7 +2900,10 @@
     }
 
     function updateGestureState(hands, now) {
-      const palmHand = hands.find((hand) => hand.isRight && hand.openPalm);
+      const singleHand = hands.length === 1;
+      const palmHand =
+        hands.find((hand) => hand.isRight && hand.openPalm) ||
+        (singleHand ? hands.find((hand) => hand.openPalm) : null);
       const rightPalm = Boolean(palmHand);
       const anyPalm = hands.some((hand) => hand.openPalm);
 
@@ -3023,10 +3051,9 @@
 
       let liveText = "等待手势";
       if (hands.length === 1) {
-        const hand = hands[0];
-        liveText = hand.isRight ? "右手 · 追踪中" : hand.isLeft ? "左手 · 追踪中" : "1 手 · 追踪中";
+        liveText = "单手 · 追踪中";
       } else if (hands.length > 1) {
-        liveText = hands.length + " 手 · 追踪中";
+        liveText = "双手 · 追踪中";
       }
       if (liveText !== state.lastLiveText) {
         setText(dom.liveText, liveText);
@@ -3034,13 +3061,15 @@
         dom.liveState.classList.toggle("is-on", hands.length > 0);
       }
 
-      const rightPalm = hands.some((hand) => hand.isRight && hand.openPalm);
+      const singleHand = hands.length === 1;
+      const singlePalm = singleHand && hands.some((hand) => hand.openPalm);
+      const rightPalm = singlePalm || hands.some((hand) => hand.isRight && hand.openPalm);
       const leftPalm = hands.some((hand) => hand.isLeft && hand.openPalm);
       const pointerHand = hands.find(
         (hand) => hand.indexActive && hand.pinchRatio > 0.35 && !hand.openPalm
       );
-      const rightDrawingHand = hands.find(isDrawingHand);
-      let hintText = "伸出右手食指 · 隔空书写";
+      const drawingHand = hands.find((hand) => isDrawingHand(hand, singleHand));
+      let hintText = "伸出食指 · 隔空书写";
       let hintTone = "muted";
       let hintProgress = 0;
 
@@ -3057,14 +3086,14 @@
           hintText = "将手掌放入镜头，用食指选择";
         } else if (rightPalm) {
           if (state.panelCloseArmed) {
-            hintText = "保持右掌 · 收起笔具";
+            hintText = singlePalm ? "保持手掌 · 收起笔具" : "保持右掌 · 收起笔具";
             hintProgress = state.palm.since ? (now - state.palm.since) / PALM_HOLD : 0;
             hintTone = "warm";
           } else {
-            hintText = "用食指指向工具 · 再次张开右掌收起";
+            hintText = "用食指指向工具 · 再次张开手掌收起";
           }
         } else if (pointerHand) {
-          hintText = "食指悬停选择 · 张开右掌收起";
+          hintText = "食指悬停选择 · 张开手掌收起";
         } else {
           hintText = "用食指指向工具";
         }
@@ -3078,10 +3107,18 @@
         hintProgress = (now - state.scale.since) / SCALE_HOLD;
         hintTone = "warm";
       } else if (state.activeStroke) {
-        hintText = state.tool === "eraser" ? "擦拭中 · 收回右手食指停止" : "正在落墨 · 收回右手食指收笔";
+        hintText = state.tool === "eraser" ? "擦拭中 · 收回食指停止" : "正在落墨 · 收回食指收笔";
         hintTone = "active";
       } else if (state.snowActive) {
         hintText = "飞雪落下 · 可继续书写";
+      } else if (singlePalm) {
+        if (state.palmRequireRelease) {
+          hintText = "松开手掌后再张开 · 选择工具或化雪";
+        } else {
+          hintText = "停驻开笔具 · 下滑化雪";
+          hintProgress = state.palm.since ? (now - state.palm.since) / PALM_HOLD : 0;
+          hintTone = "warm";
+        }
       } else if (leftPalm) {
         hintText = "左掌从上往下划 · 墨迹化雪";
         hintTone = "warm";
@@ -3093,10 +3130,10 @@
           hintProgress = state.palm.since ? (now - state.palm.since) / PALM_HOLD : 0;
           hintTone = "warm";
         }
-      } else if (rightDrawingHand) {
-        hintText = "右手食指已就绪 · 移动落墨";
+      } else if (drawingHand) {
+        hintText = "食指已就绪 · 移动落墨";
         hintTone = "active";
-      } else if (hands.some((hand) => hand.isLeft && hand.indexActive)) {
+      } else if (hands.length > 1 && hands.some((hand) => hand.isLeft && hand.indexActive)) {
         hintText = "请改用右手食指书写";
       }
 
@@ -3104,9 +3141,9 @@
 
       const dock = state.dock;
       if (dock.palm) dock.palm.classList.toggle("is-active", rightPalm || state.panelOpen);
-      if (dock.draw) dock.draw.classList.toggle("is-active", Boolean(state.activeStroke) || Boolean(rightDrawingHand));
+      if (dock.draw) dock.draw.classList.toggle("is-active", Boolean(state.activeStroke) || Boolean(drawingHand));
       if (dock.scale) dock.scale.classList.toggle("is-active", state.scale.active || Boolean(state.scale.since));
-      if (dock.snow) dock.snow.classList.toggle("is-active", leftPalm || state.snowActive);
+      if (dock.snow) dock.snow.classList.toggle("is-active", singlePalm || leftPalm || state.snowActive);
       if (dock.clear) dock.clear.classList.toggle("is-active", Boolean(state.fist.since));
     }
 
@@ -3172,10 +3209,7 @@
 
         const indexTip = points[8];
         const drawingIndex =
-          hand.isRight &&
-          hand.indexActive &&
-          !hand.openPalm &&
-          !hand.fist &&
+          isDrawingHand(hand, hands.length === 1) &&
           !state.panelOpen &&
           !state.scale.active &&
           !state.fist.since;
@@ -3204,17 +3238,20 @@
 
         context.restore();
 
-        if (hand.isRight && hand.openPalm && !state.panelOpen && !state.palmRequireRelease) {
+        const singleHand = hands.length === 1;
+        const palmCanOpenPanel = hand.isRight || singleHand;
+
+        if (palmCanOpenPanel && hand.openPalm && !state.panelOpen && !state.palmRequireRelease) {
           const progress = state.palm.since ? (now - state.palm.since) / PALM_HOLD : 0;
           drawProgressArc(context, hand.center, 26, progress, "rgba(242, 215, 158, 0.85)");
         }
 
-        if (hand.isLeft && hand.fist && state.fist.since && !state.fist.fired) {
+        if ((hand.isLeft || singleHand) && hand.fist && state.fist.since && !state.fist.fired) {
           const progress = (now - state.fist.since) / FIST_HOLD;
           drawProgressArc(context, hand.center, 30, progress, "rgba(255, 130, 114, 0.92)");
         }
 
-        if (hand.isLeft && hand.openPalm && state.swipe.history.length > 1) {
+        if ((hand.isLeft || singleHand) && hand.openPalm && state.swipe.history.length > 1) {
           const start = state.swipe.history[0];
           const end = state.swipe.history[state.swipe.history.length - 1];
           if (end.y > start.y + 6) {
@@ -3467,6 +3504,15 @@
       }
       const choice = event.target.closest(".gesture-choice");
       if (choice) selectChoice(choice);
+    });
+
+    dom.swapHandsButton.addEventListener("click", () => {
+      state.swapHandedness = !state.swapHandedness;
+      dom.swapHandsButton.setAttribute("aria-pressed", state.swapHandedness ? "true" : "false");
+      state.previousHands = [];
+      state.previousHandsAt = 0;
+      state.lastLiveText = "";
+      showToast(state.swapHandedness ? "左右手识别已交换" : "左右手识别已恢复");
     });
 
     dom.clearButton.addEventListener("click", () => {

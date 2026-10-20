@@ -43,6 +43,12 @@ npm run preview
 | 左掌下滑 | 让笔迹化作飞雪 |
 | 左手握拳 | 清除全部痕迹 |
 
+## 左右手识别
+
+- **单手操作时以手势优先**：书写、化雪和清除不再依赖 MediaPipe 的左右手分类，避免手部旋转导致标签抖动。
+- **双手同时出现时**才按左右手分配角色，例如右手张掌控制面板、左掌或左拳控制化雪与清除。
+- 顶部双向箭头按钮可手动交换左右手识别，适配镜像摄像头或特殊环境。
+
 ## 技术说明
 
 - [MediaPipe Tasks Vision](https://github.com/google-ai-edge/mediapipe) Hand Landmarker，双模型手势追踪
